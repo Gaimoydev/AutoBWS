@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AUTOBWS · bw乐园抢票助手</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E🎟️%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/style.css">
+<script src="/vendor/vue.global.prod.js"></script>
+<script src="/vendor/qrcode.js"></script>
+</head>
+<body>
+<div id="app" @click="unlockAudio">
+  <header class="topbar">
+    <div class="brand">AUTOBWS <span>· bw乐园抢票助手</span></div>
+    <nav>
+      <a :class="{on:view==='console'}" @click="go('console')">主控台</a>
+      <a :class="{on:view==='monitor'}" @click="go('monitor')" v-if="grabs.length">监控 <b>{{grabs.length}}</b></a>
+      <a :class="{on:view==='tickets'}" @click="openTickets()">场次信息</a>
+      <a :class="{on:view==='settings'}" @click="go('settings')">设置</a>
+    </nav>
+  </header>
+
+  <transition name="view" mode="out-in">
+  <main v-if="view==='console'" key="console">
+    <div class="running" v-if="runningGrabs.length">
+      <div class="run-pill" v-for="g in runningGrabs" :key="g.id" @click="openMonitor(g.id)">
+        <span class="dot"></span> {{g.names.join(' · ')}} 抢票中
+      </div>
+    </div>
+    <div class="toolbar">
+      <h2>配置</h2>
+      <button class="primary" @click="newProfile">＋ 新建配置</button>
+      <button class="ghost sm" @click="loadProfiles">刷新</button>
+    </div>
+    <div v-if="!profiles.length" class="empty">
+      <div class="big">＋</div>还没有配置 —— 点「新建配置」扫码登录、选场次,开始抢票。
+    </div>
+    <div class="cards">
+      <div class="card" v-for="p in profiles" :key="p.name">
+        <div class="card-h">
+          <div class="avatar"><span>{{(p.uname||'?').slice(0,1)}}</span><img v-if="p.face" :src="p.face" referrerpolicy="no-referrer" @error="$event.target.style.display='none'"></div>
+          <div>
+            <div class="nm">{{p.name}}</div>
+            <div class="sub">{{p.uname}} · {{p.uid}}</div>
+          </div>
+        </div>
+        <div class="card-meta">
+          <span class="chip err" v-if="p.login_alive===false" title="登录已失效,点编辑重新扫码登录">登录失效·重登</span>
+          <span class="chip on" v-else-if="p.login_alive===true">在线</span>
+          <span class="chip">{{p.sessions}} 场次</span>
+          <span class="chip" :class="{live:p.proxies}">{{p.proxies ? p.proxies+' 代理' : '直连'}}</span>
+          <span class="chip">{{p.base_interval}}ms / +{{p.offset}}ms</span>
+          <span class="chip">{{p.impersonate.split('_')[0]}}</span>
+        </div>
+        <div class="px-status" v-if="px[p.name]">{{px[p.name]}}</div>
+        <div class="card-actions">
+          <button class="primary sm" @click="startGrab([p.name])">开抢</button>
+          <button class="sm" @click="editProfile(p.name)">编辑</button>
+          <button class="sm" v-if="p.proxies" @click="proxyCheck(p.name)">代理检测</button>
+          <button class="sm danger" @click="delProfile(p.name)">删除</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <main v-else-if="view==='wizard'" key="wizard">
+    <div class="wizard">
+      <aside class="steps">
+        <div class="wiz-title">{{editing ? '编辑配置' : '新建配置'}}</div>
+        <div v-for="(s,i) in STEPS" :key="i" class="step-item"
+             :class="{active:i===step, done:reached(i)&&i!==step}" @click="jumpStep(i)">
+          <span class="mark">{{ i===step ? '●' : (reached(i)?'✓':i+1) }}</span> {{s}}
+        </div>
+        <button class="primary save-fixed" @click="saveProfile" :disabled="saving || (!editing && !loggedIn)"
+                :title="(!editing && !loggedIn) ? '先完成登录才能保存' : '保存当前配置(无需走到最后一步)'">
+          {{saving ? '保存中…' : '保存配置'}}
+        </button>
+        <button class="ghost back-console" @click="go('console')">← 返回主控台</button>
+      </aside>
+      <div class="step-body">
+        <div v-show="step===0" class="pane">
+          <h2>选择移动端指纹</h2><p>所有请求都模拟这个设备(新版 iOS / 安卓),UA 自动匹配。</p>
+          <label v-for="c in meta.impersonates" :key="c" class="radio">
+            <input type="radio" :value="c" v-model="draft.impersonate"> {{c}}
+          </label>
+        </div>
+        <div v-show="step===1" class="pane">
+          <h2>代理池</h2><p>仅抢票阶段使用。逗号/空格分隔,支持 socks5:// http:// ip:port user:pass@host:port,可填 @proxies.txt。检测在主控台或下方做。</p>
+          <input class="full" v-model="pxInput" :placeholder="pxPlaceholder">
+          <label class="check" style="margin-top:10px"><input type="checkbox" v-model="draft.fallback_direct"> 代理都失效时无缝转直连</label>
+          <div class="muted small" style="margin-top:8px">{{pxHint}}</div>
+        </div>
+        <div v-show="step===2" class="pane">
+          <h2>扫码登录</h2>
+          <div class="login-row">
+            <div class="qr-card" :class="{live:loginUrl && !loggedIn}"><div id="qrbox" class="qr-ph">准备中…</div></div>
+            <div class="login-side">
+              <div class="login-status" :class="loginCls">{{loginMsg}}</div>
+              <div class="url" v-if="loginUrl">扫不出可复制:{{loginUrl}}</div>
+              <button @click="relogin">重新登录 / 切换账号</button>
+            </div>
+          </div>
+        </div>
+        <div v-show="step===3" class="pane">
+          <h2>票号绑定(实名)</h2>
+          <div class="bind-status" :class="bindOk===true?'ok':(bindOk===false?'warn':'')">{{bindMsg}}</div>
+          <div v-if="bindOk===false" class="bind-form">
+            <input v-model="bind.name" placeholder="姓名">
+            <select v-model.number="bind.id_type"><option v-for="(v,k) in meta.id_types" :value="+k">{{v}}</option></select>
+            <input v-model="bind.personal_id" placeholder="证件号(完整)">
+            <input v-model="bind.ticket4" placeholder="票号后4位" maxlength="4">
+            <button class="primary" @click="submitBind" :disabled="binding">提交绑定</button>
+          </div>
+        </div>
+        <div v-show="step===4" class="pane">
+          <h2>选择要抢的场次</h2>
+          <div class="sess-bar">
+            <input class="full" v-model="sessQ" placeholder="搜索场次/日期">
+            <button class="sm" @click="selectAllSessions">全选可抢</button>
+            <span class="muted small">已选 {{selCount}} / 共 {{sessions.length}}</span>
+          </div>
+          <div class="muted small" v-if="sessLoading" style="padding:8px 0">加载场次中…</div>
+          <div class="sess-wrap" v-if="filteredSessions.length">
+            <table class="tbl">
+              <thead><tr><th width="34"></th><th>类型</th><th>日期</th><th>场次 / 商品</th><th>地点</th><th>活动时间</th><th>开抢</th></tr></thead>
+              <tbody>
+                <tr v-for="o in filteredSessions" :key="o.reserve_id" :class="{picked:isSel(o.reserve_id), bad:!o.ticket_no}" @click="toggleSession(o)">
+                  <td>{{isSel(o.reserve_id)?'✓':''}}</td><td>{{o.type_name}}</td><td>{{fmtDate(o.date)}}</td>
+                  <td class="wrap">{{o.title}}<span class="dim" v-if="!o.ticket_no"> (不可选)</span></td>
+                  <td class="muted wrap">{{o.location||'—'}}</td><td>{{fmtAct(o.act_begin, o.act_end)}}</td><td>{{fmtTs(o.begin)}}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div v-show="step===5" class="pane">
+          <h2>抢票设置</h2>
+          <label class="field">基础发包间隔(ms)<input type="number" v-model.number="draft.base_interval"></label>
+          <label class="field">提前发包(ms,&gt;0 提前)<input type="number" v-model.number="draft.offset"></label>
+          <label class="field">配置名<input v-model="draft.name"></label>
+        </div>
+        <div class="wiz-nav">
+          <button @click="prevStep" :disabled="step===0">← 上一步</button>
+          <div class="nav-hint">{{navHint}}</div>
+          <button class="primary" @click="nextStep" :disabled="saving">{{step===5?'完成 ✓':'下一步 →'}}</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <main v-else-if="view==='monitor'" key="monitor">
+    <div class="grab-tabs" v-if="grabs.length>1">
+      <button v-for="g in grabs" :key="g.id" :class="{on:g.id===curGrab}" @click="openMonitor(g.id)">{{g.names.join(' · ')}}<span v-if="g.done"> · 已完成</span></button>
+    </div>
+    <div v-if="snap">
+      <div class="mon-head">
+        <div class="mon-left">
+          <div class="mon-accs">{{snap.names.join(' · ')}}</div>
+          <div class="mon-sub"><span class="mon-badge" :class="monState.cls">{{monState.text}}</span> {{snap.names.length}} 账号 · {{snap.rows.length}} 场次</div>
+        </div>
+        <div class="mon-right">
+          <div class="mon-cd" :class="monState.cls">{{snap.countdown_ms>0 && snap.state!=='done' ? fmtDur(snap.countdown_ms) : '抢中 '+wonCount}}</div>
+          <div class="mon-sub">{{snap.countdown_ms>0 && snap.state!=='done' ? '距最早开抢' : '共 '+snap.rows.length+' 场'}}<span v-if="snap.clock_desc"> · {{snap.clock_desc}}</span></div>
+        </div>
+      </div>
+      <div class="stat-strip">
+        <div class="st"><b>{{disp.sent}}</b><span>发包</span></div>
+        <div class="st"><b class="g">{{disp.win}}</b><span>抢中</span></div>
+        <div class="st"><b>{{disp.relief}}</b><span>拥挤</span></div>
+        <div class="st"><b class="r">{{disp.risk}}</b><span>风控</span></div>
+        <div class="st"><b>{{disp.throttle}}</b><span>退避</span></div>
+        <div class="st"><b>{{disp.net}}</b><span>网络</span></div>
+      </div>
+      <div class="prog-wrap">
+        <table class="tbl prog">
+          <thead><tr><th>账号 · 代理</th><th>场次</th><th>开抢</th><th>状态</th><th class="r">尝试</th><th class="r">间隔(动态)</th><th>返回</th></tr></thead>
+          <tbody>
+            <tr v-for="r in snap.rows" :key="r.account+'#'+r.reserve_id">
+              <td>{{r.account}}<span class="dim" v-if="r.proxy && r.proxy!=='直连'"> · {{r.proxy}}</span></td>
+              <td>{{r.date ? r.date.slice(4) : ''}} {{r.title}}</td>
+              <td class="muted">{{r.begin?fmtTs(r.begin):'—'}}</td>
+              <td><span class="pill" :class="phaseCls(r)">{{r.phase}}</span></td>
+              <td class="r">{{r.attempts||'—'}}</td><td class="r">{{r.interval?r.interval+'ms':'—'}}</td>
+              <td class="muted">{{retLabel(r)}}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="log"><div v-for="(l,i) in snap.log" :key="i">{{l}}</div></div>
+      <div class="mon-actions"><button class="danger" @click="stopGrab(curGrab)">停止抢票</button></div>
+    </div>
+    <div v-else class="empty">连接抢票任务中…</div>
+  </main>
+
+  <main v-else-if="view==='tickets'" key="tickets">
+    <div class="toolbar"><h2>场次信息</h2><select v-model="ticketProfile" @change="loadTickets"><option v-for="p in profiles" :value="p.name">{{p.name}}</option></select><button class="ghost sm" @click="loadTickets">刷新</button></div>
+    <div v-if="ticketLoading" class="muted">查询中…</div>
+    <div v-else-if="tickets" class="panel">
+      <h3>{{ticketProfile}} · 共 {{tickets.length}} 个场次</h3>
+      <div class="muted small" v-if="!tickets.length">未查询到乐园场次信息(需登录态有效)</div>
+      <div class="sess-wrap" v-else><table class="tbl"><thead><tr><th>日期</th><th>类型</th><th>场次 / 商品</th><th>地点</th><th>活动时间</th><th>开抢时间</th><th class="r">库存</th><th>票号</th><th>状态</th></tr></thead>
+        <tbody><tr v-for="t in tickets" :key="t.reserve_id">
+          <td>{{fmtDate(t.date)}}</td><td class="muted">{{t.type_name||'—'}}</td><td class="wrap">{{t.title}}</td>
+          <td class="muted wrap">{{t.location||'—'}}</td><td>{{fmtAct(t.act_begin, t.act_end)}}</td><td class="muted">{{t.begin?fmtTs(t.begin):'—'}}</td>
+          <td class="r">{{t.stock!=null?t.stock+'/'+t.total:'—'}}</td><td>{{t.ticket_no||'—'}}</td>
+          <td><span class="pill" :class="t.reserved?'p-win':(t.ticket_no?'':'p-stop')">{{t.reserved?'已预约':(t.ticket_no?'未预约':'无票')}}</span></td>
+        </tr></tbody></table></div>
+    </div>
+  </main>
+
+  <main v-else-if="view==='settings'" key="settings">
+    <div class="toolbar"><h2>设置</h2><button class="primary sm" @click="saveSettings">保存设置</button></div>
+    <div class="panel">
+      <h3>抢票 / 检测</h3>
+      <div class="row"><label>代理检测并发数</label><input type="number" v-model.number="settings.proxy_concurrency" min="1" max="1000" style="max-width:120px"><span class="small dim">同时检测数(异步,自动不超过代理总数)</span></div>
+    </div>
+    <div class="panel">
+      <h3>MVP结算动画</h3>
+      <div class="row"><label class="switch"><input type="checkbox" v-model="settings.settle_enabled" @change="settings.settle_enabled && requestAudio()"> 抢中弹结算动画</label>
+        <button class="sm primary" @click="previewSettle">预览结算动画</button></div>
+      <div class="row"><label>音乐盒</label><select v-model="settings.settle_music"><option value="">不播放</option><option value="__random__">随机播放</option><option v-for="m in musicList" :value="m">{{m}}</option></select>
+        <button class="sm" @click="previewMusic">试听</button></div>
+    </div>
+    <div class="panel">
+      <h3>通知</h3>
+      <div class="row"><label>触发</label>
+        <label class="switch"><input type="checkbox" v-model="settings.notify_on_win"> 抢中</label>
+        <label class="switch"><input type="checkbox" v-model="settings.notify_on_done"> 全部完成</label>
+        <label class="switch"><input type="checkbox" v-model="settings.notify_on_risk"> 风控/异常</label>
+      </div>
+      <div class="row"><label class="switch"><input type="checkbox" v-model="settings.tg_enabled"> Telegram</label></div>
+      <div v-if="settings.tg_enabled" style="padding-left:12px">
+        <div class="row"><label>Bot Token</label><input v-model="settings.tg_token" placeholder="123456:ABC..."></div>
+        <div class="row"><label>Chat ID</label><input v-model="settings.tg_chat"></div>
+        <div class="row"><label>代理(可选)</label><input v-model="settings.tg_proxy" placeholder="socks5://127.0.0.1:60808 或留空走系统/直连"></div>
+        <div class="row"><button class="sm" @click="testNotify('telegram')">测试发送</button></div>
+      </div>
+      <div class="row"><label class="switch"><input type="checkbox" v-model="settings.webhook_enabled"> Webhook</label></div>
+      <div v-if="settings.webhook_enabled" style="padding-left:12px"><div class="row"><label>URL</label><input v-model="settings.webhook_url" placeholder="https://..."><button class="sm" @click="testNotify('webhook')">测试</button></div></div>
+      <div class="row"><label class="switch"><input type="checkbox" v-model="settings.smtp_enabled"> 邮件(SMTP)</label></div>
+      <div v-if="settings.smtp_enabled" style="padding-left:12px">
+        <div class="row"><label>SMTP 主机:端口</label><input v-model="settings.smtp_host" placeholder="smtp.qq.com"><input v-model.number="settings.smtp_port" placeholder="465" class="narrow"></div>
+        <div class="row"><label>账号 / 授权码</label><input v-model="settings.smtp_user"><input v-model="settings.smtp_pass" type="password"></div>
+        <div class="row"><label>收件人</label><input v-model="settings.smtp_to"><button class="sm" @click="testNotify('smtp')">测试</button></div>
+      </div>
+    </div>
+  </main>
+  </transition>
+
+  <transition name="settle">
+  <div class="settle" v-if="settle" @click="closeSettle()">
+    <div class="cs-wrap">
+      <div class="cs-banner">
+        <span class="cs-chev l">»</span>
+        <span class="cs-title">抢票成功</span>
+        <span class="cs-chev r">«</span>
+      </div>
+      <div class="cs-mvp">
+        <div class="cs-av"><span>{{(settle.account||'?').slice(0,1)}}</span><img v-if="settle.face" :src="settle.face" referrerpolicy="no-referrer" @error="$event.target.style.display='none'"></div>
+        <div class="cs-meta">
+          <span class="cs-badge">MVP</span>
+          <div class="cs-name">{{settle.account}}</div>
+          <div class="cs-sub">抢到 {{settle.title}} · {{settle.date}}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  </transition>
+
+  <transition-group name="toast" tag="div" class="toasts">
+    <div class="toast" v-for="t in toasts" :key="t.id" :class="t.kind">
+      <div class="toast-msg">{{t.msg}}</div>
+      <span class="toast-bar" :style="{animationDuration: t.dur+'ms'}"></span>
+    </div>
+  </transition-group>
+</div>
+<audio id="winaudio"></audio>
+<script src="/app.js"></script>
+</body>
+</html>
