@@ -133,8 +133,8 @@ main { padding:22px 26px; max-width:1240px; margin:0 auto; }
 .sess-wrap { max-height:46vh; overflow:auto; border:1px solid var(--border); border-radius:var(--r-sm); }
 .tbl { width:100%; border-collapse:collapse; font-size:13px; }
 .tbl th,.tbl td { text-align:left; padding:8px 12px; border-bottom:1px solid var(--border); }
-.sess-wrap .tbl th,.sess-wrap .tbl td { white-space:nowrap; }            /* 短列不换行,避免时间换行带垮整行 */
-.sess-wrap .tbl td.wrap { white-space:normal; min-width:150px; }         /* 仅场次名/地点可换行 */
+.sess-wrap .tbl th,.sess-wrap .tbl td { white-space:nowrap; }
+.sess-wrap .tbl td.wrap { white-space:normal; min-width:150px; }
 .tbl thead th { position:sticky; top:0; background:var(--surface-2); color:var(--muted); font-weight:500; z-index:1; }
 .tbl tbody tr { cursor:pointer; }
 .tbl tbody tr:hover { background:var(--surface-2); }

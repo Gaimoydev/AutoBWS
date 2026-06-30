@@ -19,7 +19,7 @@ def _build(scheme: str, host: str, port: str, user: str = "", pwd: str = "") -> 
     if scheme == "socks5":
         scheme = "socks5h"
     auth = f"{quote(user, safe='')}:{quote(pwd, safe='')}@" if user else ""
-    h = f"[{host}]" if ":" in host else host        # IPv6 字面量需方括号
+    h = f"[{host}]" if ":" in host else host
     return f"{scheme}://{auth}{h}:{port}"
 
 

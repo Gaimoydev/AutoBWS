@@ -34,7 +34,7 @@ def save(s: dict) -> dict:
         if k in DEFAULTS:
             cur[k] = v
     tmp = SETTINGS_FILE.with_suffix(".json.tmp")
-    with open(tmp, "w", encoding="utf-8") as f:       # 原子写:临时文件 → fsync → 替换,避免写一半崩溃丢设置
+    with open(tmp, "w", encoding="utf-8") as f:
         f.write(json.dumps(cur, ensure_ascii=False, indent=2))
         f.flush()
         os.fsync(f.fileno())

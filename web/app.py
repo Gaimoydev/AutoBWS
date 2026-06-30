@@ -45,7 +45,7 @@ def _host_of(value: str | None) -> str:
         return ""
     from urllib.parse import urlparse
     h = value.split("://", 1)[-1] if "://" in value else value
-    host = urlparse("//" + h).hostname            # 已去端口/去 IPv6 方括号,勿再 split(":")
+    host = urlparse("//" + h).hostname
     return (host or h).lower()
 
 
@@ -83,7 +83,7 @@ async def _guard(request, call_next):
             return JSONResponse({"error": "bad origin"}, status_code=403)
     resp = await call_next(request)
     if request.method == "GET" and not request.url.path.startswith(("/api", "/ws")):
-        resp.headers["Cache-Control"] = "no-cache"   # 静态资源每次校验,改了代码刷新即生效
+        resp.headers["Cache-Control"] = "no-cache"
     return resp
 
 
@@ -167,9 +167,9 @@ async def save_profile(body: dict):
 
     sn = profiles._safe_name
     own = {sn(x) for x in (orig, existing.name if existing else None) if x}
-    ex = set(profiles.list_profiles()) - own          # 其它配置的文件名 stem
+    ex = set(profiles.list_profiles()) - own
     final = name
-    if sn(final) in ex:                               # 按净化后的文件名判冲突,避免静默覆盖
+    if sn(final) in ex:
         i = 2
         while sn(f"{name}_{i}") in ex:
             i += 1

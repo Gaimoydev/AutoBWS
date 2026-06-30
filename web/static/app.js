@@ -255,7 +255,7 @@ window.__app = createApp({
         return
       }
       for (const r of rows) { const k = r.account + '#' + r.reserve_id; if (r.ok && !this._wonIds[k]) { this._wonIds[k] = true; this.showSettle(r) } }
-      const fresh = Math.max(0, Math.min(seq - this._lastLogSeq, log.length))   // 按绝对序号diff,兼容滑动窗
+      const fresh = Math.max(0, Math.min(seq - this._lastLogSeq, log.length))
       for (let i = log.length - fresh; i < log.length; i++) {
         const l = log[i]
         if (l.includes('切换代理')) this.toast(l, 'warn')

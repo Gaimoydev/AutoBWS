@@ -10,7 +10,7 @@ from net.http import new_async_session, DEFAULT_IMPERSONATE, IMPERSONATE_CHOICES
 from paths import COOKIE_FILE
 
 try:
-    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+    sys.stdout.reconfigure(encoding="utf-8")
 except Exception:
     pass
 

@@ -70,12 +70,6 @@ STOP_SCOPES = ("session", "daytype", "account")
 
 
 def resolve_stop(cat: str, code, policy: dict) -> tuple[str | None, str]:
-    """决定某次结果的终止动作。
-
-    返回 (scope, pace_cat):
-      scope    None=不终止 | "session" | "daytype" | "account"
-      pace_cat scope is None 时用于选择节奏分支(normal/relief/risk/throttle)。
-    """
     if cat == "success":
         sc = policy.get("success", "session")
         return (sc if sc in STOP_SCOPES else "session"), cat
@@ -155,12 +149,10 @@ class AccountPacer:
         self.last_fire = 0.0
 
     def _slot(self) -> float:
-        # 抖动只加在退避节奏上;最热的 relief 重试不加(单边抖动只会平白增延迟)
         jit = random.uniform(0, self.jitter / 1000.0) if self.interval > self.relief else 0.0
         return self.last_fire + self.interval / 1000.0 + jit
 
     async def gate(self) -> None:
-        # 在锁内只确定开火时刻并预占下个槽(用当前 interval 维持错峰),锁外再 sleep。
         async with self.lock:
             now = time.monotonic()
             self.last_fire = max(now, self.next_ok)
@@ -170,7 +162,6 @@ class AccountPacer:
             await asyncio.sleep(wait)
 
     def rearm(self) -> None:
-        # 分类响应后按最新 interval、以本次开火时刻为锚重排下个槽(修正"慢一拍")。
         self.next_ok = self._slot()
 
     @property
@@ -186,7 +177,7 @@ class AccountPacer:
 
     def on_relief(self) -> None:
         floor = self.relief
-        if self.risk_cool > 0:                 # 风控冷却期内,relief 不得砸破风控地板
+        if self.risk_cool > 0:
             floor = max(self.relief, self.risk_floor)
             self.risk_cool -= 1
         self.streak = 0
@@ -202,11 +193,9 @@ class AccountPacer:
         self.interval = self._backoff(self.rsk)
 
     def on_neterr(self) -> None:
-        # 传输错误:小幅、有界(≤2*base),不动 streak,不像服务器节流那样加速退避
         self.interval = float(min(self.max, max(self.interval, 2 * self.base)))
 
     def reset(self) -> None:
-        # 换代理后退避从头来
         self.streak = 0
         self.interval = float(self.base)
 
@@ -242,7 +231,6 @@ class AccountCtx:
 
     def report(self, *, hard_throttle: bool = False, at_max: bool = False,
                net_error: bool = False, good: bool = False) -> None:
-        # 失败累积、互不清零(交替失败也能攒够切换信号);仅"好响应"衰减
         if good:
             self.net_fail = max(0, self.net_fail - 1)
             self.maxed = max(0, self.maxed - 1)
@@ -287,7 +275,6 @@ async def _bg_close(client) -> None:
 
 
 def effective_offset(rtt_ms, lo: int = 10, hi: int = 1000, margin: int = 15) -> int:
-    # 让首包正好压在开闸:到达≈开火+单向延迟(≈RTT/2),故提前量≈RTT/2,再加小余量略早到
     return max(lo, min(hi, int(round(rtt_ms / 2 + margin))))
 
 
@@ -296,8 +283,6 @@ def _job_offset_ms(job) -> int:
 
 
 def _warm_action(remaining_ms, since_warm_s, auto: bool, measured: bool) -> str | None:
-    # 决定蹲点最后阶段做什么:measure(测RTT) / warm(保活) / None。
-    # 下限保护:不在最后 300ms 内预热/测量,避免压过开闸把首包发晚(测量需 >800ms 余量)。
     if not (remaining_ms < 3000 and since_warm_s >= 1.0):
         return None
     if auto and not measured and remaining_ms > 800:
@@ -344,7 +329,7 @@ async def grab_one(job: GrabJob, clock: ServerClock, ctx: AccountCtx, pacer: Acc
         bg.append(t)
         t.add_done_callback(lambda tt: bg.remove(tt) if tt in bg else None)
         p["proxy"] = ctx.label
-        pacer.reset()                     # 换代理 → 退避从头来,别背着旧代理的退避包袱
+        pacer.reset()
         return new
 
     try:
@@ -363,7 +348,7 @@ async def grab_one(job: GrabJob, clock: ServerClock, ctx: AccountCtx, pacer: Acc
                 break
             act = _warm_action(remaining, time.monotonic() - last_warm, auto_off, measured)
             if act == "measure":
-                off, rtt = await _measure_offset(client)       # 首次预热顺带测 RTT 定提前量
+                off, rtt = await _measure_offset(client)
                 target_ms = sess["begin"] * 1000 - off
                 deadline_ms = end_ms if end_ms else target_ms + FALLBACK_GRAB_WINDOW_MS
                 measured = True
@@ -372,7 +357,7 @@ async def grab_one(job: GrabJob, clock: ServerClock, ctx: AccountCtx, pacer: Acc
                 last_warm = time.monotonic()
             elif act == "warm":
                 try:
-                    await client.server_time(timeout=1)        # 最后3秒每~1s补热,首包不吃冷握手
+                    await client.server_time(timeout=1)
                 except Exception:
                     pass
                 last_warm = time.monotonic()
@@ -444,10 +429,10 @@ async def grab_one(job: GrabJob, clock: ServerClock, ctx: AccountCtx, pacer: Acc
                 ctx.report(hard_throttle=False, at_max=pacer.at_max, net_error=True)
                 p["phase"] = "网络重试"
             elif pace_cat == "normal":
-                p["phase"] = "抢票中"          # 不暂停:中性继续,不触碰账号级共享 pacer/ctx
+                p["phase"] = "抢票中"
             elif pace_cat == "relief":
                 pacer.on_relief()
-                ctx.report(good=True)          # 拥挤=通道在开,视为好响应,衰减切换计数
+                ctx.report(good=True)
                 p["phase"] = "抢票中"
             elif pace_cat == "risk":
                 pacer.on_risk()
@@ -457,7 +442,7 @@ async def grab_one(job: GrabJob, clock: ServerClock, ctx: AccountCtx, pacer: Acc
                 pacer.on_throttle()
                 ctx.report(hard_throttle=(not net_error), at_max=pacer.at_max, net_error=net_error)
                 p["phase"] = "退避"
-            pacer.rearm()   # 按最新 interval 重排下个槽(修正限速慢一拍)
+            pacer.rearm()
 
             if ctx.gen == cur_gen:
                 reason = ctx.reason_to_switch()
@@ -622,9 +607,6 @@ class ThreadedGrab:
                     self.notify(f"切换代理 {account}(测活失效)→ {ctx.label}")
 
     async def _reconcile(self, account: str, ajobs: list[GrabJob], ctx: AccountCtx) -> None:
-        # 中签核对:抓完后,对"未中"的场次查 myreserve(本账号已预约的场次列表,按 reserve_id)。
-        # 命中说明其实已抢到 —— 翻正"丢 ack / 响应截断把真中签记成 76647/没中"。按 reserve_id
-        # 逐场次匹配(state==4 是单场次级信号,不是账号级),真·达上限不会被误翻。
         pending = [j for j in ajobs if not self.progress[j.key].get("ok")]
         if not pending:
             return

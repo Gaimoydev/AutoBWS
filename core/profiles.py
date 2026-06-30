@@ -94,7 +94,7 @@ class Profile:
     fallback_direct: bool = True
     cookies: list = field(default_factory=list)
     base_interval: int = 300
-    offset: "int | str" = "auto"      # 数字=固定提前 ms;"auto"=按实测 RTT 自适应
+    offset: "int | str" = "auto"
     sessions: list = field(default_factory=list)
     stop_policy: dict = field(default_factory=lambda: dict(_STOP_POLICY_DEFAULT))
     pace_policy: dict = field(default_factory=lambda: copy.deepcopy(_PACE_POLICY_DEFAULT))

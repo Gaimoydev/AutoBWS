@@ -39,18 +39,17 @@ async def query_ntp(host: str = "ntp.aliyun.com", port: int = 123,
 
 
 def _parse_ntp(data: bytes) -> int | None:
-    """校验并解析 NTP 回包的传输时间戳(ms)。拒绝 KoD/未同步/非服务器/离谱时间的包。"""
     if len(data) < 48:
         return None
     b0 = data[0]
     li, mode, stratum = (b0 >> 6) & 0x3, b0 & 0x7, data[1]
-    if li == 3 or stratum == 0 or mode != 4:        # 闹钟未同步 / KoD / 非 server 回复
+    if li == 3 or stratum == 0 or mode != 4:
         return None
     secs, frac = struct.unpack("!II", data[40:48])
     if secs == 0:
         return None
     server_ms = int((secs - _NTP_DELTA) * 1000 + (frac / 2**32) * 1000)
-    if not (1_500_000_000_000 <= server_ms <= 4_100_000_000_000):   # ~2017..2100,挡掉离谱值
+    if not (1_500_000_000_000 <= server_ms <= 4_100_000_000_000):
         return None
     return server_ms
 

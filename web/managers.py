@@ -186,7 +186,7 @@ class GrabManager:
             tg = ThreadedGrab(jobs, clock, account_opts=account_opts, notify=_notify, refresh=True)
             tg.start()
         except Exception:
-            release_all(locks)          # 启动失败也释放账号锁,避免该账号卡到重启
+            release_all(locks)
             raise
         _console(f"[抢票] 开始 {names_label} · {len(jobs)} 场次 · {clock.describe()}")
         gid = _tok()
@@ -251,7 +251,7 @@ class GrabManager:
             return
         snap = self.snapshot(gid)
         snap["state"] = "done"
-        if self.jobs.pop(gid, None) is None:      # 原子认领;若已被 stop() 拿走则不重复 teardown
+        if self.jobs.pop(gid, None) is None:
             return
         await asyncio.to_thread(self._teardown, j)
         self.finished[gid] = {"snap": snap, "names": j["names"], "ts": time.time()}
