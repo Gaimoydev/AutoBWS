@@ -343,24 +343,26 @@ async def grab_one(job: GrabJob, clock: ServerClock, ctx: AccountCtx, pacer: Acc
         deadline_ms = end_ms if end_ms else target_ms + FALLBACK_GRAB_WINDOW_MS
 
         p["phase"] = "蹲点"
-        warmed = False
+        last_warm = -1e9
+        measured = False
         while not stop_event.is_set() and not astop.stopped(date, typ):
             remaining = target_ms - clock.now_ms()
             if remaining <= 0:
                 break
-            if not warmed and remaining < 3000:
-                if auto_off:
-                    off, rtt = await _measure_offset(client)   # 测 RTT,顺带热连接
+            if remaining < 3000 and time.monotonic() - last_warm >= 1.0:   # 最后3秒每~1s补热一次
+                if auto_off and not measured:
+                    off, rtt = await _measure_offset(client)   # 首次预热顺带测 RTT 定提前量
                     target_ms = sess["begin"] * 1000 - off
                     deadline_ms = end_ms if end_ms else target_ms + FALLBACK_GRAB_WINDOW_MS
+                    measured = True
                     if rtt is not None:
                         say(f"{job.account} · {sess['title'][:12]} 自动提前 {off}ms(RTT {round(rtt)}ms)")
                 else:
                     try:
-                        await client.server_time(timeout=1)
+                        await client.server_time(timeout=1)   # 保持连接热,首包不吃冷握手
                     except Exception:
                         pass
-                warmed = True
+                last_warm = time.monotonic()
             await asyncio.sleep(min((remaining - 50) / 1000.0, 0.2) if remaining > 60 else 0.002)
         if stop_event.is_set() or astop.stopped(date, typ):
             return
