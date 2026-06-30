@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import random
 import threading
 import time
@@ -9,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from core.api import BwsClient, ServerClock, classify_reserve, STOP_MESSAGES
+from core.profiles import _PACE_POLICY_DEFAULT, _as_int
 from net.proxy import proxy_label
 from utils.fmt import set_timer_resolution
 
@@ -107,6 +109,7 @@ class GrabJob:
     base_ms: int
     offset_ms: int
     stop_policy: dict = field(default_factory=lambda: {"success": "session", "soldout": "session", "limit": "daytype"})
+    pace_policy: dict = field(default_factory=lambda: copy.deepcopy(_PACE_POLICY_DEFAULT))
 
 
 def jobs_from_profile(profile) -> list[GrabJob]:
@@ -117,7 +120,8 @@ def jobs_from_profile(profile) -> list[GrabJob]:
         out.append(GrabJob(key=f"{profile.name}#{s['reserve_id']}", account=profile.name,
                            cookies=profile.cookies, impersonate=profile.impersonate,
                            sess=dict(s), base_ms=profile.base_interval, offset_ms=profile.offset,
-                           stop_policy=dict(getattr(profile, "stop_policy", None) or {})))
+                           stop_policy=dict(getattr(profile, "stop_policy", None) or {}),
+                           pace_policy=copy.deepcopy(getattr(profile, "pace_policy", None) or {})))
     return out
 
 
@@ -133,13 +137,15 @@ def make_progress(job: GrabJob) -> dict:
 
 class AccountPacer:
 
-    def __init__(self, base_ms: int, *, max_ms: int = 1500, jitter_ms: int = 40,
-                 relief_floor_ms: int = 120, risk_floor_ms: int = 800):
+    def __init__(self, base_ms: int, policy: dict | None = None):
+        pol = policy or _PACE_POLICY_DEFAULT
         self.base = max(1, base_ms)
-        self.max = max(self.base, max_ms)
-        self.relief_floor = max(self.base, relief_floor_ms)
-        self.risk_floor = min(self.max, max(self.base, risk_floor_ms))
-        self.jitter = max(0, jitter_ms)
+        self.max = max(self.base, _as_int(pol.get("max_ms"), 1500))
+        self.jitter = max(0, _as_int(pol.get("jitter_ms"), 40))
+        self.relief = min(self.max, max(1, _as_int(pol.get("relief_ms"), 120)))
+        self.curve = pol.get("curve", "accel")
+        self.thr = pol.get("throttle") or {"mode": "auto", "value": self.base}
+        self.rsk = pol.get("risk") or {"mode": "auto", "value": 800}
         self.interval = float(self.base)
         self.streak = 0
         self.lock = asyncio.Lock()
@@ -157,17 +163,24 @@ class AccountPacer:
     def at_max(self) -> bool:
         return self.interval >= self.max
 
+    def _backoff(self, cfg: dict) -> float:
+        if cfg.get("mode") == "fixed":
+            return float(min(self.max, max(self.base, _as_int(cfg.get("value"), self.base))))
+        floor = max(self.base, _as_int(cfg.get("value"), self.base))
+        step = self.base if self.curve == "linear" else self.base * self.streak
+        return float(min(self.max, max(self.interval, floor) + step))
+
     def on_relief(self) -> None:
         self.streak = 0
-        self.interval = float(self.relief_floor)
+        self.interval = float(self.relief)
 
     def on_throttle(self) -> None:
         self.streak += 1
-        self.interval = min(self.max, self.interval + self.base * self.streak)
+        self.interval = self._backoff(self.thr)
 
     def on_risk(self) -> None:
-        self.streak += 2
-        self.interval = min(self.max, max(self.interval, float(self.risk_floor)))
+        self.streak += 1
+        self.interval = self._backoff(self.rsk)
 
 
 class AccountCtx:
@@ -468,7 +481,8 @@ class ThreadedGrab:
 
     async def _account_async(self, account: str, ajobs: list[GrabJob]) -> None:
         ctx = self.ctxs[account]
-        pacer = AccountPacer(ajobs[0].base_ms if ajobs else 80)
+        pacer = AccountPacer(ajobs[0].base_ms if ajobs else 80,
+                             ajobs[0].pace_policy if ajobs else None)
         stats = self.stats[account]
         astop = AccountStop(event=asyncio.Event(), buckets=set())
         if self.refresh:

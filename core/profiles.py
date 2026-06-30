@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import re
 import time
@@ -32,6 +33,49 @@ def _coerce_stop_policy(raw) -> dict:
     return out
 
 
+_PACE_POLICY_DEFAULT = {
+    "relief_ms": 120,
+    "throttle": {"mode": "auto", "value": 300},
+    "risk": {"mode": "auto", "value": 800},
+    "curve": "accel",
+    "max_ms": 1500,
+    "jitter_ms": 40,
+}
+
+
+def _as_int(v, default: int) -> int:
+    try:
+        return int(v)
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
+def _coerce_state(raw, default: dict) -> dict:
+    out = dict(default)
+    if isinstance(raw, dict):
+        if raw.get("mode") in ("auto", "fixed"):
+            out["mode"] = raw["mode"]
+        out["value"] = max(1, _as_int(raw.get("value"), default["value"]))
+    return out
+
+
+def _coerce_pace_policy(raw, base: int = 300) -> dict:
+    d = _PACE_POLICY_DEFAULT
+    base = max(1, _as_int(base, 300))
+    if not isinstance(raw, dict):
+        raw = {}
+    max_ms = max(base, _as_int(raw.get("max_ms"), d["max_ms"]))
+    curve = raw.get("curve") if raw.get("curve") in ("linear", "accel") else d["curve"]
+    return {
+        "relief_ms": min(max_ms, max(1, _as_int(raw.get("relief_ms"), d["relief_ms"]))),
+        "throttle": _coerce_state(raw.get("throttle"), d["throttle"]),
+        "risk": _coerce_state(raw.get("risk"), d["risk"]),
+        "curve": curve,
+        "max_ms": max_ms,
+        "jitter_ms": max(0, _as_int(raw.get("jitter_ms"), d["jitter_ms"])),
+    }
+
+
 @dataclass
 class Profile:
     name: str
@@ -46,6 +90,7 @@ class Profile:
     offset: int = 50
     sessions: list = field(default_factory=list)
     stop_policy: dict = field(default_factory=lambda: dict(_STOP_POLICY_DEFAULT))
+    pace_policy: dict = field(default_factory=lambda: copy.deepcopy(_PACE_POLICY_DEFAULT))
     updated_at: int = 0
 
     @property
@@ -66,6 +111,7 @@ def _coerce(d: dict) -> Profile:
         if lf in kw and not isinstance(kw[lf], list):
             kw[lf] = []
     kw["stop_policy"] = _coerce_stop_policy(kw.get("stop_policy"))
+    kw["pace_policy"] = _coerce_pace_policy(kw.get("pace_policy"), kw.get("base_interval", 300))
     return Profile(**kw)
 
 

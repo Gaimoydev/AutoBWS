@@ -107,6 +107,11 @@ main { padding:22px 26px; max-width:1240px; margin:0 auto; }
 .radio,.check { display:flex; align-items:center; gap:9px; padding:8px 0; cursor:pointer; }
 .field { display:block; margin:14px 0; color:var(--muted); font-size:13px; }
 .field input,.field select { display:block; margin-top:5px; width:100%; max-width:260px; }
+.adv { margin:12px 0; border:1px solid var(--border); border-radius:8px; padding:8px 12px; max-width:280px; }
+.adv summary { cursor:pointer; color:var(--accent); font-size:13px; user-select:none; }
+.field .pair { display:flex; gap:8px; margin-top:5px; max-width:260px; }
+.field .pair select { flex:0 0 86px; margin-top:0; }
+.field .pair input { flex:1; margin-top:0; max-width:none; }
 .wiz-nav { display:flex; align-items:center; gap:14px; padding-top:18px; margin-top:16px; border-top:1px solid var(--border); }
 .nav-hint { flex:1; font-size:12px; color:var(--dim); }
 

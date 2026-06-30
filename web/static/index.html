@@ -160,6 +160,28 @@
               <option value="account">暂停账号下的所有任务</option>
             </select>
           </label>
+          <details class="adv">
+            <summary>限速策略(高级)</summary>
+            <div class="muted small" style="margin:6px 0 10px">不确定就全部留默认</div>
+            <label class="field">拥挤/火爆 提速到(ms)<input type="number" v-model.number="draft.pace_policy.relief_ms" placeholder="120"></label>
+            <label class="field">节流(76650 等)
+              <div class="pair">
+                <select v-model="draft.pace_policy.throttle.mode"><option value="auto">自动</option><option value="fixed">固定</option></select>
+                <input type="number" v-model.number="draft.pace_policy.throttle.value" placeholder="300">
+              </div>
+            </label>
+            <label class="field">风控(412/429/-702 等)
+              <div class="pair">
+                <select v-model="draft.pace_policy.risk.mode"><option value="auto">自动</option><option value="fixed">固定</option></select>
+                <input type="number" v-model.number="draft.pace_policy.risk.value" placeholder="800">
+              </div>
+            </label>
+            <label class="field">自动退避曲线(仅自动模式)
+              <select v-model="draft.pace_policy.curve"><option value="accel">加速</option><option value="linear">线性</option></select>
+            </label>
+            <label class="field">间隔上限(ms)<input type="number" v-model.number="draft.pace_policy.max_ms" placeholder="1500"></label>
+            <label class="field">抖动(ms)<input type="number" v-model.number="draft.pace_policy.jitter_ms" placeholder="40"></label>
+          </details>
           <label class="field">配置名<input v-model="draft.name"></label>
         </div>
         <div class="wiz-nav">
