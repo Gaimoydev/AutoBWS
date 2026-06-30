@@ -9,7 +9,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Callable
 
-from core.api import BwsClient, ServerClock, classify_reserve, STOP_MESSAGES
+from core.api import BwsClient, ServerClock, classify_reserve, STOP_MESSAGES, FATAL_MESSAGES
 from core.profiles import _PACE_POLICY_DEFAULT, _as_int
 from net.proxy import proxy_label
 from utils.fmt import set_timer_resolution
@@ -150,14 +150,24 @@ class AccountPacer:
         self.streak = 0
         self.lock = asyncio.Lock()
         self.next_ok = 0.0
+        self.last_fire = 0.0
+
+    def _slot(self) -> float:
+        return self.last_fire + self.interval / 1000.0 + random.uniform(0, self.jitter / 1000.0)
 
     async def gate(self) -> None:
+        # 在锁内只确定开火时刻并预占下个槽(用当前 interval 维持错峰),锁外再 sleep。
         async with self.lock:
             now = time.monotonic()
-            if self.next_ok > now:
-                await asyncio.sleep(self.next_ok - now)
-            jit = random.uniform(0, self.jitter / 1000.0)
-            self.next_ok = time.monotonic() + self.interval / 1000.0 + jit
+            self.last_fire = max(now, self.next_ok)
+            wait = self.last_fire - now
+            self.next_ok = self._slot()
+        if wait > 0:
+            await asyncio.sleep(wait)
+
+    def rearm(self) -> None:
+        # 分类响应后按最新 interval、以本次开火时刻为锚重排下个槽(修正"慢一拍")。
+        self.next_ok = self._slot()
 
     @property
     def at_max(self) -> bool:
@@ -181,6 +191,15 @@ class AccountPacer:
     def on_risk(self) -> None:
         self.streak += 1
         self.interval = self._backoff(self.rsk)
+
+    def on_neterr(self) -> None:
+        # 传输错误:小幅、有界(≤2*base),不动 streak,不像服务器节流那样加速退避
+        self.interval = float(min(self.max, max(self.interval, 2 * self.base)))
+
+    def reset(self) -> None:
+        # 换代理后退避从头来
+        self.streak = 0
+        self.interval = float(self.base)
 
 
 class AccountCtx:
@@ -275,6 +294,7 @@ async def grab_one(job: GrabJob, clock: ServerClock, ctx: AccountCtx, pacer: Acc
         bg.append(t)
         t.add_done_callback(lambda tt: bg.remove(tt) if tt in bg else None)
         p["proxy"] = ctx.label
+        pacer.reset()                     # 换代理 → 退避从头来,别背着旧代理的退避包袱
         return new
 
     try:
@@ -330,6 +350,14 @@ async def grab_one(job: GrabJob, clock: ServerClock, ctx: AccountCtx, pacer: Acc
                 p["phase"] = "开抢"
                 say("开抢")
 
+            if cat == "fatal":
+                msg = FATAL_MESSAGES.get(code, outcome.get("message") or f"HTTP {outcome.get('http')}")
+                p.update(phase="失效", done=True, result=f"已停止:{msg}")
+                if not astop.event.is_set():
+                    astop.event.set()
+                    say(f"{job.account}:{msg} —— 已停该账号,请重新扫码登录/绑定")
+                return
+
             if scope is not None:
                 if cat == "success":
                     stats["win"] += 1
@@ -349,7 +377,11 @@ async def grab_one(job: GrabJob, clock: ServerClock, ctx: AccountCtx, pacer: Acc
                         say(f"{job.account} 触发账号停止")
                 return
 
-            if pace_cat == "normal":
+            if net_error:
+                pacer.on_neterr()
+                ctx.report(hard_throttle=False, at_max=pacer.at_max, net_error=True)
+                p["phase"] = "网络重试"
+            elif pace_cat == "normal":
                 p["phase"] = "抢票中"          # 不暂停:中性继续,不触碰账号级共享 pacer/ctx
             elif pace_cat == "relief":
                 pacer.on_relief()
@@ -363,6 +395,7 @@ async def grab_one(job: GrabJob, clock: ServerClock, ctx: AccountCtx, pacer: Acc
                 pacer.on_throttle()
                 ctx.report(hard_throttle=(not net_error), at_max=pacer.at_max, net_error=net_error)
                 p["phase"] = "退避"
+            pacer.rearm()   # 按最新 interval 重排下个槽(修正限速慢一拍)
 
             if ctx.gen == cur_gen:
                 reason = ctx.reason_to_switch()

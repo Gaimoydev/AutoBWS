@@ -24,6 +24,9 @@ STOP_CODES = {75574, 76647}
 STOP_MESSAGES = {75574: "场次已被抢空", 76647: "预约数已达上限"}
 RELIEF_CODES = {76651, 75637}
 RISK_CODES = {-702, -412, -509}
+FATAL_CODES = {-101, -111, -352, 75638, 75636}
+FATAL_MESSAGES = {-101: "账号未登录", -111: "csrf 校验失败", -352: "触发风控校验(需人工/重登)",
+                  75638: "未绑定门票信息", 75636: "实名信息校验不通过"}
 
 BIND_MESSAGES = {
     0: "绑定成功",
@@ -135,7 +138,9 @@ def classify_reserve(outcome: dict) -> str:
         return "success"
     if code in STOP_CODES:
         return "stop"
-    if http in (412, 429) or code in RISK_CODES:
+    if code in FATAL_CODES:
+        return "fatal"
+    if http in (412, 429, 403) or (http is not None and http >= 500) or code in RISK_CODES:
         return "risk"
     if code in RELIEF_CODES:
         return "relief"

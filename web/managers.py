@@ -197,7 +197,7 @@ class GrabManager:
         from web import settings as settingsmod
         from core import notify
         st = settingsmod.load()
-        seen, risk_alerted = set(), False
+        seen, risk_alerted, fatal_alerted = set(), False, False
         while gid in self.jobs:
             j = self.jobs.get(gid)
             if not j:
@@ -222,6 +222,10 @@ class GrabManager:
                 if risk >= 60:
                     risk_alerted = True
                     await notify.notify_all(st, "AUTOBWS 风控告警", "持续风控,建议检查代理或放宽间隔", "risk")
+            if not fatal_alerted and any(r.get("phase") == "失效" for r in rows):
+                fatal_alerted = True
+                await notify.notify_all(st, "AUTOBWS 登录/绑定失效",
+                                        "账号登录态或绑定失效,该账号已停,请重新扫码登录/绑定", "risk")
             if tg.all_done:
                 won = sum(1 for r in tg.progress.values() if r.get("ok"))
                 if st.get("notify_on_done"):
