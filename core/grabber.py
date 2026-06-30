@@ -140,7 +140,7 @@ class AccountPacer:
     def __init__(self, base_ms: int, policy: dict | None = None):
         pol = policy or _PACE_POLICY_DEFAULT
         self.base = max(1, base_ms)
-        self.max = max(self.base, _as_int(pol.get("max_ms"), 1500))
+        self.max = max(self.base, _as_int(pol.get("max_ms"), 1000))
         self.jitter = max(0, _as_int(pol.get("jitter_ms"), 40))
         self.relief = min(self.max, max(1, _as_int(pol.get("relief_ms"), 120)))
         self.curve = pol.get("curve", "accel")

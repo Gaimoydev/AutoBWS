@@ -38,7 +38,7 @@ _PACE_POLICY_DEFAULT = {
     "throttle": {"mode": "auto", "value": 300},
     "risk": {"mode": "auto", "value": 800},
     "curve": "accel",
-    "max_ms": 1500,
+    "max_ms": 1000,
     "jitter_ms": 40,
 }
 

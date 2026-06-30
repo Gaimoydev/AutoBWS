@@ -179,7 +179,7 @@
             <label class="field">自动退避曲线(仅自动模式)
               <select v-model="draft.pace_policy.curve"><option value="accel">加速</option><option value="linear">线性</option></select>
             </label>
-            <label class="field">间隔上限(ms)<input type="number" v-model.number="draft.pace_policy.max_ms" placeholder="1500"></label>
+            <label class="field">间隔上限(ms)<input type="number" v-model.number="draft.pace_policy.max_ms" placeholder="1000"></label>
             <label class="field">抖动(ms)<input type="number" v-model.number="draft.pace_policy.jitter_ms" placeholder="40"></label>
           </details>
           <label class="field">配置名<input v-model="draft.name"></label>
