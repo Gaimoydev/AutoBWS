@@ -6,7 +6,7 @@ window.__app = createApp({
       view: 'console', profiles: [], grabs: [], meta: { impersonates: [], id_types: {}, default_impersonate: 'safari260_ios' },
       px: {},
       editing: false, origName: null, step: 0, maxStep: 0,
-      draft: { name: '新配置', impersonate: 'safari260_ios', fallback_direct: true, base_interval: 300, offset: 50 },
+      draft: { name: '新配置', impersonate: 'safari260_ios', fallback_direct: true, base_interval: 300, offset: 50, stop_policy: { success: 'session', soldout: 'session', limit: 'session' } },
       pxInput: '', proxiesCount: 0,
       loginId: null, loggedIn: false, account: null, loginMsg: '正在准备登录环境…', loginCls: '', loginUrl: '', _loginPoll: null, _loginGen: 0,
       bindOk: null, bindChecking: false, bind: { name: '', id_type: 0, personal_id: '', ticket4: '' }, binding: false,
@@ -65,6 +65,7 @@ window.__app = createApp({
   methods: {
     async api(url, opts) { try { const r = await fetch(url, opts); return await r.json() } catch (e) { return null } },
     go(v) { this.view = v },
+    _defStopPolicy() { return { success: 'session', soldout: 'session', limit: 'session' } },
     async loadMeta() { this.meta = await this.api('/api/meta') || this.meta; if (!this.draft.impersonate) this.draft.impersonate = this.meta.default_impersonate },
     async loadProfiles() { this.profiles = await this.api('/api/profiles') || [] },
     async refreshGrabs() { this.grabs = await this.api('/api/grab') || [] },
@@ -73,14 +74,14 @@ window.__app = createApp({
     newProfile() {
       this.editing = false; this.origName = null; this.loginId = null; this.loggedIn = false; this.account = null
       this.bindOk = null; this.bindChecking = false; this.sessions = []; this.selected = {}; this.pxInput = ''; this.proxiesCount = 0; this.maxStep = 0
-      this.draft = { name: '新配置', impersonate: this.meta.default_impersonate, fallback_direct: true, base_interval: 300, offset: 50 }
+      this.draft = { name: '新配置', impersonate: this.meta.default_impersonate, fallback_direct: true, base_interval: 300, offset: 50, stop_policy: this._defStopPolicy() }
       this.loginMsg = '正在准备登录环境…'; this.loginCls = ''; this.loginUrl = ''
       this.go('wizard'); this.goStep(0)
     },
     async editProfile(name) {
       const p = await this.api(`/api/profiles/${encodeURIComponent(name)}`); if (!p || p.error) return
       this.editing = true; this.origName = name; this.loginId = null
-      this.draft = { name: p.name, impersonate: p.impersonate, fallback_direct: p.fallback_direct, base_interval: p.base_interval, offset: p.offset }
+      this.draft = { name: p.name, impersonate: p.impersonate, fallback_direct: p.fallback_direct, base_interval: p.base_interval, offset: p.offset, stop_policy: p.stop_policy || this._defStopPolicy() }
       this.pxInput = ''; this.proxiesCount = p.proxies; this.selected = {}; this.sessions = []
       this.loggedIn = false; this.account = null; this.bindOk = null; this.maxStep = 5
       this.go('wizard'); this.goStep(0)
@@ -198,6 +199,7 @@ window.__app = createApp({
       const body = {
         name: this.draft.name, impersonate: this.draft.impersonate, fallback_direct: this.draft.fallback_direct,
         base_interval: this.draft.base_interval, offset: this.draft.offset, proxies: this.proxiesPayload(),
+        stop_policy: this.draft.stop_policy,
         sessions: (this.editing && !this.sessions.length) ? null : selOpts, login_id: this.loginId, orig_name: this.origName,
       }
       const r = await this.api('/api/profiles', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })

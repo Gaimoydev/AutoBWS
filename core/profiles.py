@@ -15,6 +15,23 @@ def _safe_name(name: str) -> str:
     return (s[:60] or "profile")
 
 
+_STOP_POLICY_DEFAULT = {"success": "session", "soldout": "session", "limit": "session"}
+_STOP_POLICY_ALLOWED = {
+    "success": ("session", "daytype", "account"),
+    "soldout": ("none", "session"),
+    "limit": ("none", "session", "daytype", "account"),
+}
+
+
+def _coerce_stop_policy(raw) -> dict:
+    out = dict(_STOP_POLICY_DEFAULT)
+    if isinstance(raw, dict):
+        for k, allowed in _STOP_POLICY_ALLOWED.items():
+            if raw.get(k) in allowed:
+                out[k] = raw[k]
+    return out
+
+
 @dataclass
 class Profile:
     name: str
@@ -28,6 +45,7 @@ class Profile:
     base_interval: int = 300
     offset: int = 50
     sessions: list = field(default_factory=list)
+    stop_policy: dict = field(default_factory=lambda: dict(_STOP_POLICY_DEFAULT))
     updated_at: int = 0
 
     @property
@@ -47,6 +65,7 @@ def _coerce(d: dict) -> Profile:
     for lf in ("sessions", "cookies"):
         if lf in kw and not isinstance(kw[lf], list):
             kw[lf] = []
+    kw["stop_policy"] = _coerce_stop_policy(kw.get("stop_policy"))
     return Profile(**kw)
 
 

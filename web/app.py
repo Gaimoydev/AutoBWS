@@ -91,7 +91,7 @@ def brief(p: Profile) -> dict:
             "login_alive": liveness.alive_of(p.name), "impersonate": p.impersonate,
             "sessions": len(p.sessions), "proxies": _pcount(p.proxies),
             "fallback_direct": p.fallback_direct, "base_interval": p.base_interval,
-            "offset": p.offset, "has_cookies": bool(p.cookies)}
+            "offset": p.offset, "stop_policy": p.stop_policy, "has_cookies": bool(p.cookies)}
 
 
 def _pcount(proxies) -> int:
@@ -155,6 +155,8 @@ async def save_profile(body: dict):
     prof.fallback_direct = bool(body.get("fallback_direct", True))
     prof.base_interval = _int(body.get("base_interval"), prof.base_interval)
     prof.offset = _int(body.get("offset"), prof.offset)
+    if body.get("stop_policy") is not None:
+        prof.stop_policy = profiles._coerce_stop_policy(body["stop_policy"])
     if body.get("sessions") is not None:
         prof.sessions = [session_snapshot(o) for o in body["sessions"] if selectable(o)]
 

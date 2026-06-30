@@ -5,7 +5,7 @@ import random
 import threading
 import time
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 from core.api import BwsClient, ServerClock, classify_reserve, STOP_MESSAGES
@@ -64,6 +64,39 @@ def selectable(o: dict) -> bool:
     return bool(o.get("ticket_no")) and o.get("reserve_id") is not None
 
 
+STOP_SCOPES = ("session", "daytype", "account")
+
+
+def resolve_stop(cat: str, code, policy: dict) -> tuple[str | None, str]:
+    """决定某次结果的终止动作。
+
+    返回 (scope, pace_cat):
+      scope    None=不终止 | "session" | "daytype" | "account"
+      pace_cat scope is None 时用于选择节奏分支(normal/relief/risk/throttle)。
+    """
+    if cat == "success":
+        sc = policy.get("success", "session")
+        return (sc if sc in STOP_SCOPES else "session"), cat
+    if code == 75574:
+        pol = policy.get("soldout", "session")
+        return (pol, cat) if pol in STOP_SCOPES else (None, "normal")
+    if code == 76647:
+        pol = policy.get("limit", "session")
+        return (pol, cat) if pol in STOP_SCOPES else (None, "normal")
+    if cat == "stop":
+        return "session", cat
+    return None, cat
+
+
+@dataclass
+class AccountStop:
+    event: asyncio.Event
+    buckets: set
+
+    def stopped(self, date, typ) -> bool:
+        return self.event.is_set() or (date, typ) in self.buckets
+
+
 @dataclass
 class GrabJob:
     key: str
@@ -73,6 +106,7 @@ class GrabJob:
     sess: dict
     base_ms: int
     offset_ms: int
+    stop_policy: dict = field(default_factory=lambda: {"success": "session", "soldout": "session", "limit": "session"})
 
 
 def jobs_from_profile(profile) -> list[GrabJob]:
@@ -82,7 +116,8 @@ def jobs_from_profile(profile) -> list[GrabJob]:
             continue
         out.append(GrabJob(key=f"{profile.name}#{s['reserve_id']}", account=profile.name,
                            cookies=profile.cookies, impersonate=profile.impersonate,
-                           sess=dict(s), base_ms=profile.base_interval, offset_ms=profile.offset))
+                           sess=dict(s), base_ms=profile.base_interval, offset_ms=profile.offset,
+                           stop_policy=dict(getattr(profile, "stop_policy", None) or {})))
     return out
 
 
@@ -207,9 +242,10 @@ async def _bg_close(client) -> None:
 
 async def grab_one(job: GrabJob, clock: ServerClock, ctx: AccountCtx, pacer: AccountPacer, *,
                    stop_event: threading.Event, progress: dict, stats: Counter,
-                   notify: Callable[[str], None] | None = None) -> None:
+                   astop: AccountStop, notify: Callable[[str], None] | None = None) -> None:
     p = progress[job.key]
     sess = job.sess
+    date, typ = sess.get("date"), sess.get("type")
 
     def say(m: str) -> None:
         if notify:
@@ -235,7 +271,7 @@ async def grab_one(job: GrabJob, clock: ServerClock, ctx: AccountCtx, pacer: Acc
 
         p["phase"] = "蹲点"
         warmed = False
-        while not stop_event.is_set():
+        while not stop_event.is_set() and not astop.stopped(date, typ):
             remaining = target_ms - clock.now_ms()
             if remaining <= 0:
                 break
@@ -246,11 +282,11 @@ async def grab_one(job: GrabJob, clock: ServerClock, ctx: AccountCtx, pacer: Acc
                     pass
                 warmed = True
             await asyncio.sleep(min((remaining - 50) / 1000.0, 0.2) if remaining > 60 else 0.002)
-        if stop_event.is_set():
+        if stop_event.is_set() or astop.stopped(date, typ):
             return
 
         attempts = 0
-        while not stop_event.is_set():
+        while not stop_event.is_set() and not astop.stopped(date, typ):
             if ctx.gen != cur_gen:
                 client = swap(client)
                 cur_gen = ctx.gen
@@ -263,13 +299,14 @@ async def grab_one(job: GrabJob, clock: ServerClock, ctx: AccountCtx, pacer: Acc
                 return
 
             await pacer.gate()
-            if stop_event.is_set():
+            if stop_event.is_set() or astop.stopped(date, typ):
                 break
             attempts += 1
             outcome = await client.reserve_do(sess["reserve_id"], sess["ticket_no"])
             net_error = bool(outcome.get("error")) and outcome.get("http") is None
             cat = classify_reserve(outcome)
             code = outcome.get("code")
+            scope, pace_cat = resolve_stop(cat, code, job.stop_policy)
             stats["sent"] += 1
             stats[cat] += 1
             if net_error:
@@ -279,21 +316,33 @@ async def grab_one(job: GrabJob, clock: ServerClock, ctx: AccountCtx, pacer: Acc
             if attempts == 1:
                 p["phase"] = "开抢"
                 say("开抢")
-            if cat == "success":
-                stats["win"] += 1
-                p.update(phase="抢中", done=True, ok=True, result="已抢中")
-                say(f"{job.account} · {sess['title'][:12]} 抢中")
+
+            if scope is not None:
+                if cat == "success":
+                    stats["win"] += 1
+                    p.update(phase="抢中", done=True, ok=True, result="已抢中")
+                    say(f"{job.account} · {sess['title'][:12]} 抢中")
+                else:
+                    msg = STOP_MESSAGES.get(code, outcome.get("message"))
+                    p.update(phase="停止", done=True, result=f"已停止:{msg}")
+                    say(f"{job.account} · {sess['title'][:12]}:{msg}")
+                if scope == "daytype":
+                    if (date, typ) not in astop.buckets:
+                        astop.buckets.add((date, typ))
+                        say(f"{job.account} 触发同日同类停止({date}/{sess.get('type_name','')})")
+                elif scope == "account":
+                    if not astop.event.is_set():
+                        astop.event.set()
+                        say(f"{job.account} 触发账号停止")
                 return
-            if cat == "stop":
-                msg = STOP_MESSAGES.get(code, outcome.get("message"))
-                p.update(phase="停止", done=True, result=f"已停止:{msg}")
-                say(f"{job.account} · {sess['title'][:12]}:{msg}")
-                return
-            if cat == "relief":
+
+            if pace_cat == "normal":
+                p["phase"] = "抢票中"          # 不暂停:中性继续,不触碰账号级共享 pacer/ctx
+            elif pace_cat == "relief":
                 pacer.on_relief()
                 ctx.report(hard_throttle=False, at_max=False, net_error=net_error)
                 p["phase"] = "抢票中"
-            elif cat == "risk":
+            elif pace_cat == "risk":
                 pacer.on_risk()
                 ctx.report(hard_throttle=True, at_max=True, net_error=False)
                 p["phase"] = "退避"
@@ -314,8 +363,14 @@ async def grab_one(job: GrabJob, clock: ServerClock, ctx: AccountCtx, pacer: Acc
         say(f"异常 {job.account} · {sess['title'][:12]}:{type(e).__name__}")
     finally:
         if not p["done"]:
-            p.update(done=True, phase=p["phase"] if p["phase"] in ("停止", "截止", "异常") else "已中止",
-                     result=p.get("result") or "已中止")
+            if astop.event.is_set():
+                res = "已中止(账号停止)"
+            elif (date, typ) in astop.buckets:
+                res = "已中止(同日同类停止)"
+            else:
+                res = p.get("result") or "已中止"
+            phase = p["phase"] if p["phase"] in ("停止", "截止", "异常") else "已中止"
+            p.update(done=True, phase=phase, result=res)
         await _bg_close(client)
         if bg:
             await asyncio.gather(*list(bg), return_exceptions=True)
@@ -415,28 +470,29 @@ class ThreadedGrab:
         ctx = self.ctxs[account]
         pacer = AccountPacer(ajobs[0].base_ms if ajobs else 80)
         stats = self.stats[account]
+        astop = AccountStop(event=asyncio.Event(), buckets=set())
         if self.refresh:
             await _refresh_account(ajobs, ctx, self.clock, self.progress, self.notify)
             if self.jobs:
                 self.earliest_target = min(j.sess["begin"] * 1000 - j.offset_ms for j in self.jobs)
         tasks = [grab_one(j, self.clock, ctx, pacer, stop_event=self.stop_event,
-                          progress=self.progress, stats=stats, notify=self.notify) for j in ajobs]
+                          progress=self.progress, stats=stats, astop=astop, notify=self.notify) for j in ajobs]
         if ctx.has_alt:
-            tasks.append(self._liveness(account, ajobs, ctx))
+            tasks.append(self._liveness(account, ajobs, ctx, astop))
         await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def _liveness(self, account: str, ajobs: list[GrabJob], ctx: AccountCtx) -> None:
+    async def _liveness(self, account: str, ajobs: list[GrabJob], ctx: AccountCtx, astop: AccountStop) -> None:
         keys = [j.key for j in ajobs]
         imp = ajobs[0].impersonate
         fails = 0
-        while not self.stop_event.is_set():
+        while not self.stop_event.is_set() and not astop.event.is_set():
             if all(self.progress[k]["done"] for k in keys):
                 return
             slept = 0.0
-            while slept < 15 and not self.stop_event.is_set():
+            while slept < 15 and not self.stop_event.is_set() and not astop.event.is_set():
                 await asyncio.sleep(0.5)
                 slept += 0.5
-            if self.stop_event.is_set() or all(self.progress[k]["done"] for k in keys):
+            if self.stop_event.is_set() or astop.event.is_set() or all(self.progress[k]["done"] for k in keys):
                 return
             gen0, proxy0 = ctx.gen, ctx.proxy
             if proxy0 is None:

@@ -138,6 +138,28 @@
           <h2>抢票设置</h2>
           <label class="field">基础发包间隔(ms)<input type="number" v-model.number="draft.base_interval"></label>
           <label class="field">提前发包(ms,&gt;0 提前)<input type="number" v-model.number="draft.offset"></label>
+          <div class="field" style="margin-bottom:4px;color:var(--txt)">暂停条件(命中后)</div>
+          <label class="field">预约成功
+            <select v-model="draft.stop_policy.success">
+              <option value="session">停该场次</option>
+              <option value="daytype">停同日同类</option>
+              <option value="account">停该账号</option>
+            </select>
+          </label>
+          <label class="field">场次已被抢空(75574)
+            <select v-model="draft.stop_policy.soldout">
+              <option value="none">不暂停(继续抢)</option>
+              <option value="session">停该场次</option>
+            </select>
+          </label>
+          <label class="field">账号预约达上限(76647)
+            <select v-model="draft.stop_policy.limit">
+              <option value="none">不暂停(继续抢)</option>
+              <option value="session">停该场次</option>
+              <option value="daytype">停同日同类(推荐)</option>
+              <option value="account">停该账号</option>
+            </select>
+          </label>
           <label class="field">配置名<input v-model="draft.name"></label>
         </div>
         <div class="wiz-nav">
