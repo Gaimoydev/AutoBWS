@@ -6,7 +6,7 @@ window.__app = createApp({
       view: 'console', profiles: [], grabs: [], meta: { impersonates: [], id_types: {}, default_impersonate: 'safari260_ios' },
       px: {},
       editing: false, origName: null, step: 0, maxStep: 0,
-      draft: { name: '新配置', impersonate: 'safari260_ios', fallback_direct: true, base_interval: 300, offset: 50, stop_policy: { success: 'session', soldout: 'session', limit: 'daytype' }, pace_policy: { relief_ms: 120, throttle: { mode: 'auto', value: 300 }, risk: { mode: 'auto', value: 800 }, curve: 'accel', max_ms: 1500, jitter_ms: 40 } },
+      draft: { name: '新配置', impersonate: 'safari260_ios', fallback_direct: true, base_interval: 300, offset: 'auto', stop_policy: { success: 'session', soldout: 'session', limit: 'daytype' }, pace_policy: { relief_ms: 120, throttle: { mode: 'auto', value: 300 }, risk: { mode: 'auto', value: 800 }, curve: 'accel', max_ms: 1500, jitter_ms: 40 } },
       pxInput: '', proxiesCount: 0,
       loginId: null, loggedIn: false, account: null, loginMsg: '正在准备登录环境…', loginCls: '', loginUrl: '', _loginPoll: null, _loginGen: 0,
       bindOk: null, bindChecking: false, bind: { name: '', id_type: 0, personal_id: '', ticket4: '' }, binding: false,
@@ -75,7 +75,7 @@ window.__app = createApp({
     newProfile() {
       this.editing = false; this.origName = null; this.loginId = null; this.loggedIn = false; this.account = null
       this.bindOk = null; this.bindChecking = false; this.sessions = []; this.selected = {}; this.pxInput = ''; this.proxiesCount = 0; this.maxStep = 0
-      this.draft = { name: '新配置', impersonate: this.meta.default_impersonate, fallback_direct: true, base_interval: 300, offset: 50, stop_policy: this._defStopPolicy(), pace_policy: this._defPacePolicy() }
+      this.draft = { name: '新配置', impersonate: this.meta.default_impersonate, fallback_direct: true, base_interval: 300, offset: 'auto', stop_policy: this._defStopPolicy(), pace_policy: this._defPacePolicy() }
       this.loginMsg = '正在准备登录环境…'; this.loginCls = ''; this.loginUrl = ''
       this.go('wizard'); this.goStep(0)
     },

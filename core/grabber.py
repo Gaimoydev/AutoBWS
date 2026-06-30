@@ -286,6 +286,30 @@ async def _bg_close(client) -> None:
         pass
 
 
+def effective_offset(rtt_ms, lo: int = 10, hi: int = 1000, margin: int = 15) -> int:
+    # 让首包正好压在开闸:到达≈开火+单向延迟(≈RTT/2),故提前量≈RTT/2,再加小余量略早到
+    return max(lo, min(hi, int(round(rtt_ms / 2 + margin))))
+
+
+def _job_offset_ms(job) -> int:
+    return 50 if job.offset_ms == "auto" else int(job.offset_ms)
+
+
+async def _measure_offset(client, n: int = 3) -> tuple[int, float | None]:
+    rtts = []
+    for _ in range(n):
+        t0 = time.monotonic()
+        try:
+            await client.server_time(timeout=1)
+        except Exception:
+            continue
+        rtts.append((time.monotonic() - t0) * 1000)
+    if not rtts:
+        return 50, None
+    rtt = min(rtts)
+    return effective_offset(rtt), round(rtt)
+
+
 async def grab_one(job: GrabJob, clock: ServerClock, ctx: AccountCtx, pacer: AccountPacer, *,
                    stop_event: threading.Event, progress: dict, stats: Counter,
                    astop: AccountStop, notify: Callable[[str], None] | None = None) -> None:
@@ -312,7 +336,9 @@ async def grab_one(job: GrabJob, clock: ServerClock, ctx: AccountCtx, pacer: Acc
         return new
 
     try:
-        target_ms = sess["begin"] * 1000 - job.offset_ms
+        auto_off = (job.offset_ms == "auto")
+        off = 50 if auto_off else int(job.offset_ms)
+        target_ms = sess["begin"] * 1000 - off
         end_ms = sess["end"] * 1000 if sess["end"] else 0
         deadline_ms = end_ms if end_ms else target_ms + FALLBACK_GRAB_WINDOW_MS
 
@@ -323,10 +349,17 @@ async def grab_one(job: GrabJob, clock: ServerClock, ctx: AccountCtx, pacer: Acc
             if remaining <= 0:
                 break
             if not warmed and remaining < 3000:
-                try:
-                    await client.server_time(timeout=1)
-                except Exception:
-                    pass
+                if auto_off:
+                    off, rtt = await _measure_offset(client)   # 测 RTT,顺带热连接
+                    target_ms = sess["begin"] * 1000 - off
+                    deadline_ms = end_ms if end_ms else target_ms + FALLBACK_GRAB_WINDOW_MS
+                    if rtt is not None:
+                        say(f"{job.account} · {sess['title'][:12]} 自动提前 {off}ms(RTT {round(rtt)}ms)")
+                else:
+                    try:
+                        await client.server_time(timeout=1)
+                    except Exception:
+                        pass
                 warmed = True
             await asyncio.sleep(min((remaining - 50) / 1000.0, 0.2) if remaining > 60 else 0.002)
         if stop_event.is_set() or astop.stopped(date, typ):
@@ -440,7 +473,7 @@ async def _refresh_account(jobs: list[GrabJob], ctx: AccountCtx, clock: ServerCl
                            progress: dict, notify: Callable[[str], None] | None = None) -> None:
     if not jobs:
         return
-    earliest = min(j.sess["begin"] * 1000 - j.offset_ms for j in jobs)
+    earliest = min(j.sess["begin"] * 1000 - _job_offset_ms(j) for j in jobs)
     if earliest - clock.now_ms() < 25_000:
         return
     try:
@@ -493,7 +526,7 @@ class ThreadedGrab:
             self.progress[j.key]["proxy"] = self.ctxs[j.account].label
         self.stop_event = threading.Event()
         self.threads: list[threading.Thread] = []
-        self.earliest_target = (min(j.sess["begin"] * 1000 - j.offset_ms for j in jobs)
+        self.earliest_target = (min(j.sess["begin"] * 1000 - _job_offset_ms(j) for j in jobs)
                                 if jobs else 0)
 
     def start(self) -> None:
@@ -535,7 +568,7 @@ class ThreadedGrab:
         if self.refresh:
             await _refresh_account(ajobs, ctx, self.clock, self.progress, self.notify)
             if self.jobs:
-                self.earliest_target = min(j.sess["begin"] * 1000 - j.offset_ms for j in self.jobs)
+                self.earliest_target = min(j.sess["begin"] * 1000 - _job_offset_ms(j) for j in self.jobs)
         tasks = [grab_one(j, self.clock, ctx, pacer, stop_event=self.stop_event,
                           progress=self.progress, stats=stats, astop=astop, notify=self.notify) for j in ajobs]
         if ctx.has_alt:

@@ -155,7 +155,8 @@ async def save_profile(body: dict):
         prof.proxies = list(body["proxies"])
     prof.fallback_direct = bool(body.get("fallback_direct", True))
     prof.base_interval = _int(body.get("base_interval"), prof.base_interval)
-    prof.offset = _int(body.get("offset"), prof.offset)
+    if body.get("offset") is not None:
+        prof.offset = profiles._coerce_offset(body["offset"])
     if body.get("stop_policy") is not None:
         prof.stop_policy = profiles._coerce_stop_policy(body["stop_policy"])
     if body.get("pace_policy") is not None:

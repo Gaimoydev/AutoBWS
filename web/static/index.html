@@ -50,7 +50,7 @@
           <span class="chip on" v-else-if="p.login_alive===true">在线</span>
           <span class="chip">{{p.sessions}} 场次</span>
           <span class="chip" :class="{live:p.proxies}">{{p.proxies ? p.proxies+' 代理' : '直连'}}</span>
-          <span class="chip">{{p.base_interval}}ms / +{{p.offset}}ms</span>
+          <span class="chip">{{p.base_interval}}ms / +{{p.offset==='auto'?'auto':p.offset+'ms'}}</span>
           <span class="chip">{{p.impersonate.split('_')[0]}}</span>
         </div>
         <div class="px-status" v-if="px[p.name]">{{px[p.name]}}</div>
@@ -137,7 +137,7 @@
         <div v-show="step===5" class="pane">
           <h2>抢票设置</h2>
           <label class="field">基础发包间隔(ms)<input type="number" v-model.number="draft.base_interval"></label>
-          <label class="field">提前发包(ms,&gt;0 提前)<input type="number" v-model.number="draft.offset"></label>
+          <label class="field">提前发包(填数字=固定 ms;填 <b>auto</b>=按网络延迟自适应,默认)<input v-model="draft.offset" placeholder="auto"></label>
           <div class="field" style="margin-bottom:4px;color:var(--txt)">暂停条件(命中后)</div>
           <label class="field">预约成功
             <select v-model="draft.stop_policy.success">

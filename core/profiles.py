@@ -50,6 +50,13 @@ def _as_int(v, default: int) -> int:
         return default
 
 
+def _coerce_offset(v):
+    if isinstance(v, str) and v.strip().lower() == "auto":
+        return "auto"
+    n = _as_int(v, None)
+    return max(0, n) if n is not None else "auto"
+
+
 def _coerce_state(raw, default: dict) -> dict:
     out = dict(default)
     if isinstance(raw, dict):
@@ -87,7 +94,7 @@ class Profile:
     fallback_direct: bool = True
     cookies: list = field(default_factory=list)
     base_interval: int = 300
-    offset: int = 50
+    offset: "int | str" = "auto"      # 数字=固定提前 ms;"auto"=按实测 RTT 自适应
     sessions: list = field(default_factory=list)
     stop_policy: dict = field(default_factory=lambda: dict(_STOP_POLICY_DEFAULT))
     pace_policy: dict = field(default_factory=lambda: copy.deepcopy(_PACE_POLICY_DEFAULT))
@@ -112,6 +119,7 @@ def _coerce(d: dict) -> Profile:
             kw[lf] = []
     kw["stop_policy"] = _coerce_stop_policy(kw.get("stop_policy"))
     kw["pace_policy"] = _coerce_pace_policy(kw.get("pace_policy"), kw.get("base_interval", 300))
+    kw["offset"] = _coerce_offset(kw.get("offset"))
     return Profile(**kw)
 
 
