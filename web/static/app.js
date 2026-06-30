@@ -6,7 +6,7 @@ window.__app = createApp({
       view: 'console', profiles: [], grabs: [], meta: { impersonates: [], id_types: {}, default_impersonate: 'safari260_ios' },
       px: {},
       editing: false, origName: null, step: 0, maxStep: 0,
-      draft: { name: '新配置', impersonate: 'safari260_ios', fallback_direct: true, base_interval: 300, offset: 50, stop_policy: { success: 'session', soldout: 'session', limit: 'session' } },
+      draft: { name: '新配置', impersonate: 'safari260_ios', fallback_direct: true, base_interval: 300, offset: 50, stop_policy: { success: 'session', soldout: 'session', limit: 'daytype' } },
       pxInput: '', proxiesCount: 0,
       loginId: null, loggedIn: false, account: null, loginMsg: '正在准备登录环境…', loginCls: '', loginUrl: '', _loginPoll: null, _loginGen: 0,
       bindOk: null, bindChecking: false, bind: { name: '', id_type: 0, personal_id: '', ticket4: '' }, binding: false,
@@ -65,7 +65,7 @@ window.__app = createApp({
   methods: {
     async api(url, opts) { try { const r = await fetch(url, opts); return await r.json() } catch (e) { return null } },
     go(v) { this.view = v },
-    _defStopPolicy() { return { success: 'session', soldout: 'session', limit: 'session' } },
+    _defStopPolicy() { return { success: 'session', soldout: 'session', limit: 'daytype' } },
     async loadMeta() { this.meta = await this.api('/api/meta') || this.meta; if (!this.draft.impersonate) this.draft.impersonate = this.meta.default_impersonate },
     async loadProfiles() { this.profiles = await this.api('/api/profiles') || [] },
     async refreshGrabs() { this.grabs = await this.api('/api/grab') || [] },

@@ -81,7 +81,7 @@ def resolve_stop(cat: str, code, policy: dict) -> tuple[str | None, str]:
         pol = policy.get("soldout", "session")
         return (pol, cat) if pol in STOP_SCOPES else (None, "normal")
     if code == 76647:
-        pol = policy.get("limit", "session")
+        pol = policy.get("limit", "daytype")
         return (pol, cat) if pol in STOP_SCOPES else (None, "normal")
     if cat == "stop":
         return "session", cat
@@ -106,7 +106,7 @@ class GrabJob:
     sess: dict
     base_ms: int
     offset_ms: int
-    stop_policy: dict = field(default_factory=lambda: {"success": "session", "soldout": "session", "limit": "session"})
+    stop_policy: dict = field(default_factory=lambda: {"success": "session", "soldout": "session", "limit": "daytype"})
 
 
 def jobs_from_profile(profile) -> list[GrabJob]:

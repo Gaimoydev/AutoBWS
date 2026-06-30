@@ -15,7 +15,7 @@ def _safe_name(name: str) -> str:
     return (s[:60] or "profile")
 
 
-_STOP_POLICY_DEFAULT = {"success": "session", "soldout": "session", "limit": "session"}
+_STOP_POLICY_DEFAULT = {"success": "session", "soldout": "session", "limit": "daytype"}
 _STOP_POLICY_ALLOWED = {
     "success": ("session", "daytype", "account"),
     "soldout": ("none", "session"),
