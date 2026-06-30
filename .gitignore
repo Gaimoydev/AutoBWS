@@ -25,3 +25,7 @@ biliTickerBuy-main/
 test.txt
 settings.json
 *.png
+
+# tests & archived legacy UI — kept local, not shipped to the repo
+tests/
+legacy/
