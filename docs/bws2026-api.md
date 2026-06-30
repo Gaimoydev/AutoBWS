@@ -55,8 +55,10 @@ GET /x/activity/bws/online/park/reserve/info?reserve_date=20260710,20260711,2026
 
 ### `data.user_reserve_info[date]` — 预约额度
 ```json
-"20260711": {"total_count":5,"cur_count":0}    // 每天最多约5场,已约cur_count
+"20260711": {"total_count":5,"cur_count":0}    // 该日该类型上限total_count,已约cur_count
 ```
+- **额度按 (账号 + 日期 + `reserve_type`) 计**:活动场次(type 0)每人每天 **5 场**;商品场次(type 1)每人每天 **1 件**。
+- `cur_count == total_count` 时,该 (日期+类型) 桶已满,对该桶内其它场次发 reserve/do 会返回 `76647`。**不影响其它日期或另一类型**。
 
 ### `data.reserve_list[date]` — 场次数组(单个场次对象)
 ```json
@@ -86,7 +88,7 @@ body: inter_reserve_id=<场次 reserve_id> ticket_no=<完整票号(来自 user_t
   - `0` 成功(`data.cur_reserve_count` 更新已约数)
   - `412` / `429` / `76651` / `-702` 预约火爆/限流 → **重试**
   - `75574` 场次已被抢空
-  - `76647` 预约数已达上限
+  - `76647` 预约数已达上限(该 **账号+日期+类型** 当天额度满:活动 5/天、商品 1/天;同桶其它场次会照样 76647,**别的日期/类型不受影响**)
   - `76650` 操作频繁
 - POST 编码:web 端 axios 默认 `application/x-www-form-urlencoded`;**去年脚本用 multipart/form-data 同样成功**(两者皆可)。
 - 未发现 ptoken / gaia 验证码挑战:风控仅以 412/火爆码体现,简单重试即可(与去年一致)。
